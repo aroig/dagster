@@ -1,6 +1,6 @@
 from typing import Callable, List, NamedTuple, Optional
 
-from .defines import TOX_MAP, SupportedPython
+from .defines import TOX_MAP
 from .step_builder import BuildkiteQueue, CommandStep, StepBuilder
 from .utils import get_python_versions_for_branch
 from .steps.mypy import build_mypy_step
@@ -118,7 +118,6 @@ class PackageBuildSpec(
                     tox_cmd = f"tox -vv {tox_file}-e {TOX_MAP[version]}{tox_env_suffix}"
 
                     cmds = extra_cmds + [
-                        "pip install -U virtualenv",
                         f"cd {self.directory}",
                         tox_cmd,
                     ]
