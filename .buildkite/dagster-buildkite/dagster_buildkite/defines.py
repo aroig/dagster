@@ -2,6 +2,7 @@ from typing import Dict, List
 
 
 class SupportedPython:
+    V3_10 = "3.10.4"
     V3_9 = "3.9.10"
     V3_8 = "3.8.12"
     V3_7 = "3.7.12"
@@ -13,11 +14,13 @@ SupportedPythons = [
     SupportedPython.V3_7,
     SupportedPython.V3_8,
     SupportedPython.V3_9,
+    SupportedPython.V3_10,
 ]
 
 ExamplePythons = [SupportedPython.V3_8]
 
 TOX_MAP = {
+    SupportedPython.V3_10: "py310",
     SupportedPython.V3_9: "py39",
     SupportedPython.V3_8: "py38",
     SupportedPython.V3_7: "py37",
@@ -29,6 +32,7 @@ VERSION_TEST_DIRECTIVES: Dict[str, List[str]] = {
     "test-py37": [SupportedPython.V3_7],
     "test-py38": [SupportedPython.V3_8],
     "test-py39": [SupportedPython.V3_9],
+    "test-py310": [SupportedPython.V3_10],
     "test-all": SupportedPythons,
 }
 
