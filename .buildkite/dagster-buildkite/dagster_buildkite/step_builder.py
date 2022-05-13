@@ -2,6 +2,8 @@ import os
 from enum import Enum
 from typing import Dict, List, Optional
 
+from typing_extensions import TypedDict
+
 from .defines import SupportedPythons
 from .images.versions import INTEGRATION_IMAGE_VERSION, UNIT_IMAGE_VERSION
 from .utils import CommandStep
@@ -14,6 +16,20 @@ ECR_PLUGIN = "ecr#v2.2.0"
 
 AWS_ACCOUNT_ID = os.environ.get("AWS_ACCOUNT_ID")
 AWS_ECR_REGION = "us-west-2"
+
+# This is only a partial specification to cover the attributes we use. Additional keys can be added
+# from the full spec defined at the below link:
+#   https://buildkite.com/docs/pipelines/command-step
+class CommandStep(TypedDict, total=False):
+    agents: Dict[str, str]
+    commands: List[str]
+    depends_on: List[str]
+    key: str
+    label: str
+    plugins: List[Dict[str, object]]
+    retry: Dict[str, object]
+    timeout_in_minutes: int
+
 
 class BuildkiteQueue(Enum):
     DOCKER = "docker-p"
