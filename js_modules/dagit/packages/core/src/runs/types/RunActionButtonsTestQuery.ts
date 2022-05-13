@@ -19,6 +19,17 @@ export interface RunActionButtonsTestQuery_pipelineRunOrError_Run_tags {
   value: string;
 }
 
+export interface RunActionButtonsTestQuery_pipelineRunOrError_Run_assets_key {
+  __typename: "AssetKey";
+  path: string[];
+}
+
+export interface RunActionButtonsTestQuery_pipelineRunOrError_Run_assets {
+  __typename: "Asset";
+  id: string;
+  key: RunActionButtonsTestQuery_pipelineRunOrError_Run_assets_key;
+}
+
 export interface RunActionButtonsTestQuery_pipelineRunOrError_Run_executionPlan_steps_inputs_dependsOn {
   __typename: "ExecutionStep";
   key: string;
@@ -41,6 +52,16 @@ export interface RunActionButtonsTestQuery_pipelineRunOrError_Run_executionPlan 
   __typename: "ExecutionPlan";
   artifactsPersisted: boolean;
   steps: RunActionButtonsTestQuery_pipelineRunOrError_Run_executionPlan_steps[];
+}
+
+export interface RunActionButtonsTestQuery_pipelineRunOrError_Run_assetNodesToExecute_assetKey {
+  __typename: "AssetKey";
+  path: string[];
+}
+
+export interface RunActionButtonsTestQuery_pipelineRunOrError_Run_assetNodesToExecute {
+  __typename: "AssetNode";
+  assetKey: RunActionButtonsTestQuery_pipelineRunOrError_Run_assetNodesToExecute_assetKey;
 }
 
 export interface RunActionButtonsTestQuery_pipelineRunOrError_Run_repositoryOrigin {
@@ -81,6 +102,7 @@ export interface RunActionButtonsTestQuery_pipelineRunOrError_Run {
   status: RunStatus;
   mode: string;
   tags: RunActionButtonsTestQuery_pipelineRunOrError_Run_tags[];
+  assets: RunActionButtonsTestQuery_pipelineRunOrError_Run_assets[];
   rootRunId: string | null;
   parentRunId: string | null;
   pipelineName: string;
@@ -88,6 +110,7 @@ export interface RunActionButtonsTestQuery_pipelineRunOrError_Run {
   pipelineSnapshotId: string | null;
   executionPlan: RunActionButtonsTestQuery_pipelineRunOrError_Run_executionPlan | null;
   stepKeysToExecute: string[] | null;
+  assetNodesToExecute: RunActionButtonsTestQuery_pipelineRunOrError_Run_assetNodesToExecute[] | null;
   repositoryOrigin: RunActionButtonsTestQuery_pipelineRunOrError_Run_repositoryOrigin | null;
   startTime: number | null;
   endTime: number | null;

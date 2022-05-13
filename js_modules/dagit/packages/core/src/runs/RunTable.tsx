@@ -21,7 +21,7 @@ import {workspacePipelinePath, workspacePipelinePathGuessRepo} from '../workspac
 
 import {RunActionsMenu, RunBulkActionsMenu} from './RunActionsMenu';
 import {RunStatusTagWithStats} from './RunStatusTag';
-import {RunStepKeysAssetList} from './RunStepKeysAssetList';
+import {RunAssetKeyTags} from './RunAssetKeyTags';
 import {RunTags} from './RunTags';
 import {RunStateSummary, RunTime, RUN_TIME_FRAGMENT, titleForRun} from './RunUtils';
 import {RunFilterToken} from './RunsFilterInput';
@@ -152,6 +152,11 @@ export const RUN_TABLE_RUN_FRAGMENT = gql`
     runId
     status
     stepKeysToExecute
+    assetNodesToExecute {
+      assetKey {
+        path
+      }
+    }
     canTerminate
     mode
     rootRunId
@@ -230,7 +235,9 @@ const RunRow: React.FC<{
       </td>
       <td>
         <Box flex={{direction: 'column', gap: 5}}>
-          {!isAssetGroup(run.pipelineName) ? (
+          {isAssetGroup(run.pipelineName) ? (
+            <RunAssetKeyTags assetKeys={(run.assetNodesToExecute || []).map((a) => a.assetKey)} />
+          ) : (
             <Box flex={{direction: 'row', gap: 8, alignItems: 'center'}}>
               <PipelineReference
                 isJob={isJob}
@@ -253,8 +260,6 @@ const RunRow: React.FC<{
                 <Icon name="open_in_new" color={Colors.Blue500} />
               </Link>
             </Box>
-          ) : (
-            <RunStepKeysAssetList stepKeys={run.stepKeysToExecute} />
           )}
           <RunTags
             tags={run.tags}

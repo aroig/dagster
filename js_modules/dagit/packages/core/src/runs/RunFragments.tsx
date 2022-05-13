@@ -33,6 +33,12 @@ export const RunFragments = {
         key
         value
       }
+      assets {
+        id
+        key {
+          path
+        }
+      }
       rootRunId
       parentRunId
       pipelineName
@@ -43,6 +49,11 @@ export const RunFragments = {
         ...ExecutionPlanToGraphFragment
       }
       stepKeysToExecute
+      assetNodesToExecute {
+        assetKey {
+          path
+        }
+      }
       ...RunFragmentForRepositoryMatch
       ...RunDetailsFragment
       updateTime

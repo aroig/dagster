@@ -394,6 +394,7 @@ type Run implements PipelineRun {
   assets: [Asset!]!
   events(after: Cursor): [DagsterRunEvent!]!
   resolvedOpSelection: [String!]
+  assetNodesToExecute: [AssetNode!]
   assetMaterializations: [MaterializationEvent!]!
   startTime: Float
   endTime: Float
