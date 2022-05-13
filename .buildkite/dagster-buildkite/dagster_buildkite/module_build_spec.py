@@ -1,20 +1,14 @@
 from typing import Callable, List, NamedTuple, Optional
 
 from .defines import TOX_MAP, SupportedPython
-from .step_builder import BuildkiteQueue, StepBuilder
+from .step_builder import BuildkiteQueue, CommandStep, StepBuilder
 from .utils import get_python_versions_for_branch
+from .steps.mypy import build_mypy_step
+from .steps.pylint import build_pylint_step
 
-MYPY_EXCLUDES = [
-    "python_modules/libraries/dagster-databricks",
-    "python_modules/libraries/dagster-dbt",
-    "python_modules/libraries/dagster-docker",
-    "examples/docs_snippets",
-]
-
-
-class ModuleBuildSpec(
+class PackageBuildSpec(
     NamedTuple(
-        "_ModuleBuildSpec",
+        "_PackageBuildSpec",
         [
             ("directory", str),
             ("env_vars", Optional[List[str]]),
@@ -65,6 +59,9 @@ class ModuleBuildSpec(
         upload_coverage (bool, optional): Whether to copy coverage artifacts. Enabled by default.
         timeout_in_minutes (int, optional): Fail after this many minutes
         queue (BuildkiteQueue, optional): Which queue to run on
+        run_pytest (bool): Whether to run pytest. Enabled by default.
+        run_mypy (bool): Whether to run mypy. Enabled by default.
+        run_pylint (bool): Whether to run pylint. Enabled by default.
     """
 
     def __new__(
@@ -81,8 +78,11 @@ class ModuleBuildSpec(
         upload_coverage: bool = True,
         timeout_in_minutes: Optional[int] = None,
         queue: Optional[BuildkiteQueue] = None,
+        run_pytest: bool = True,
+        run_mypy: bool = True,
+        run_pylint: bool = True,
     ):
-        return super(ModuleBuildSpec, cls).__new__(
+        return super(PackageBuildSpec, cls).__new__(
             cls,
             directory,
             env_vars or [],
@@ -96,77 +96,67 @@ class ModuleBuildSpec(
             upload_coverage,
             timeout_in_minutes,
             queue,
+            run_pytest,
+            run_mypy,
+            run_pylint,
         )
 
-    def get_tox_build_steps(self):
+    def build_tox_steps(self) -> List[CommandStep]:
         base_label = self.buildkite_label or self.directory.split("/")[-1]
         steps = []
 
         tox_env_suffixes = self.tox_env_suffixes or [""]
 
-        for version in self.supported_pythons:
-            for tox_env_suffix in tox_env_suffixes:
-                label = base_label + tox_env_suffix
+        if self.run_pytest:
+            for version in self.supported_pythons:
+                for tox_env_suffix in tox_env_suffixes:
+                    label = base_label + tox_env_suffix
 
-                extra_cmds = self.extra_cmds_fn(version) if self.extra_cmds_fn else []
+                    extra_cmds = self.extra_cmds_fn(version) if self.extra_cmds_fn else []
 
-                # See: https://github.com/dagster-io/dagster/issues/2512
-                tox_file = "-c %s " % self.tox_file if self.tox_file else ""
-                tox_cmd = f"tox -vv {tox_file}-e {TOX_MAP[version]}{tox_env_suffix}"
+                    tox_file = "-c %s " % self.tox_file if self.tox_file else ""
+                    tox_cmd = f"tox -vv {tox_file}-e {TOX_MAP[version]}{tox_env_suffix}"
 
-                cmds = extra_cmds + [
-                    "pip install -U virtualenv",
-                    f"cd {self.directory}",
-                    tox_cmd,
-                ]
-
-                if self.upload_coverage:
-                    coverage = f".coverage.{label}.{version}.$BUILDKITE_BUILD_ID"
-                    cmds += [
-                        f"mv .coverage {coverage}",
-                        f"buildkite-agent artifact upload {coverage}",
+                    cmds = extra_cmds + [
+                        "pip install -U virtualenv",
+                        f"cd {self.directory}",
+                        tox_cmd,
                     ]
 
-                version_str = ".".join(version.split(".")[:2])
-                step = (
-                    StepBuilder(
-                        f":pytest: {label} {version_str}",
-                        timeout_in_minutes=self.timeout_in_minutes,
+                    if self.upload_coverage:
+                        coverage = f".coverage.{label}.{version}.$BUILDKITE_BUILD_ID"
+                        cmds += [
+                            f"mv .coverage {coverage}",
+                            f"buildkite-agent artifact upload {coverage}",
+                        ]
+
+                    version_str = ".".join(version.split(".")[:2])
+                    step = (
+                        StepBuilder(
+                            f":pytest: {label} {version_str}",
+                            timeout_in_minutes=self.timeout_in_minutes,
+                        )
+                        .run(*cmds)
+                        .on_integration_image(version, self.env_vars or [])
                     )
-                    .run(*cmds)
-                    .on_integration_image(version, self.env_vars or [])
-                )
 
-                if self.retries:
-                    step = step.with_retry(self.retries)
+                    if self.retries:
+                        step = step.with_retry(self.retries)
 
-                if self.depends_on_fn:
-                    step = step.depends_on(self.depends_on_fn(version))
+                    if self.depends_on_fn:
+                        step = step.depends_on(self.depends_on_fn(version))
 
-                if self.queue:
-                    step = step.on_queue(self.queue)
+                    if self.queue:
+                        step = step.on_queue(self.queue)
 
-                steps.append(step.build())
+                    steps.append(step.build())
 
-        # We expect the tox file to define a pylint testenv. This is run in a dedicated buildkite step.
-        steps.append(
-            StepBuilder(f":lint-roller: {base_label}")
-            .run(
-                "pip install -U virtualenv",
-                f"cd {self.directory}",
-                "tox -vv -e pylint",
-            )
-            .on_integration_image(SupportedPython.V3_8)
-            .build()
-        )
+        if self.run_mypy:
+            # The toxfile must define a mypy testenv.
+            steps.append(build_mypy_step(self.directory, base_label))
 
-        # We expect the tox file to define a mypy testenv. This is run in a dedicated buildkite step.
-        if self.directory not in MYPY_EXCLUDES:
-            steps.append(
-                StepBuilder(f":mypy: {base_label}")
-                .run("pip install -U virtualenv", f"cd {self.directory}", "tox -vv -e mypy")
-                .on_integration_image(SupportedPython.V3_8)
-                .build()
-            )
+        if self.run_pylint:
+            # The toxfile must define a pylint testenv.
+            steps.append(build_pylint_step(self.directory, base_label))
 
         return steps
