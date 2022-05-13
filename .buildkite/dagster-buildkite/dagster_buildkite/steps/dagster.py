@@ -47,8 +47,8 @@ def build_dagster_steps() -> List[CommandStep]:
     steps += build_pipenv_smoke_steps()
     steps += build_docs_steps()
     steps += helm_steps()
-    steps += schema_checks()
-    steps += graphql_python_client_backcompat_checks()
+    steps += build_sql_schema_check_steps()
+    steps += build_graphql_python_client_backcompat_steps()
 
     return steps
 
@@ -682,7 +682,7 @@ def build_repo_wide_black_steps() -> List[CommandStep]:
     ]
 
 
-def schema_checks(version=SupportedPython.V3_8):
+def build_sql_schema_check_steps(version=SupportedPython.V3_8):
     return [
         StepBuilder("SQL schema checks")
         .on_integration_image(version)
@@ -691,7 +691,7 @@ def schema_checks(version=SupportedPython.V3_8):
     ]
 
 
-def graphql_python_client_backcompat_checks(version=SupportedPython.V3_8):
+def build_graphql_python_client_backcompat_steps(version=SupportedPython.V3_8):
     return [
         StepBuilder("Backwards compat checks for the GraphQL Python Client")
         .on_integration_image(version)
