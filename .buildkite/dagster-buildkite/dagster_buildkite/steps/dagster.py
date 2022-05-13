@@ -15,7 +15,7 @@ from ..utils import (
     network_buildkite_container,
 )
 from .docs import build_docs_steps
-from .helm import helm_steps
+from .helm import build_helm_steps
 from .test_images import (
     build_publish_test_image_steps,
     core_test_image_depends_fn,
@@ -46,7 +46,7 @@ def build_dagster_steps() -> List[CommandStep]:
     # https://github.com/dagster-io/dagster/issues/2785
     steps += build_pipenv_smoke_steps()
     steps += build_docs_steps()
-    steps += helm_steps()
+    steps += build_helm_steps()
     steps += build_sql_schema_check_steps()
     steps += build_graphql_python_client_backcompat_steps()
 
