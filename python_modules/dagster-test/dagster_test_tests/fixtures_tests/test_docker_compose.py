@@ -6,7 +6,9 @@ import pytest
 import yaml
 from dagster_test.fixtures.docker_compose import (
     connect_container_to_network,
+    default_docker_compose_yml,
     disconnect_container_from_network,
+    docker_compose_cm,
     network_name_from_yml,
 )
 
@@ -36,51 +38,54 @@ def test_docker_compose(docker_compose, retrying_requests):
     assert retrying_requests.get(f"http://{docker_compose['server']}:8000").ok
 
 
-def test_docker_compose_cm_from_test_directory(docker_compose_cm, retrying_requests):
-    with docker_compose_cm() as docker_compose:
-        assert retrying_requests.get(f"http://{docker_compose['server']}:8000").ok
+def test_docker_compose_cm_from_test_directory(test_directory, retrying_requests):
+    with docker_compose_cm(default_docker_compose_yml(test_directory)) as hostnames:
+        assert retrying_requests.get(f"http://{hostnames['server']}:8000").ok
 
 
-def test_docker_compose_cm_from_cwd(other_docker_compose_yml, docker_compose_cm, retrying_requests):
-    with other_docker_compose_yml.dirpath().as_cwd(), docker_compose_cm() as docker_compose:
-        assert retrying_requests.get(f"http://{docker_compose['other_server']}:8000").ok
+def test_docker_compose_cm_from_cwd(other_docker_compose_yml, test_directory, retrying_requests):
+    with other_docker_compose_yml.dirpath().as_cwd(), docker_compose_cm(
+        default_docker_compose_yml(test_directory)
+    ) as hostnames:
+        assert retrying_requests.get(f"http://{hostnames['other_server']}:8000").ok
 
 
-def test_docker_compose_cm_with_yml(other_docker_compose_yml, docker_compose_cm, retrying_requests):
-    with docker_compose_cm(docker_compose_yml=other_docker_compose_yml) as docker_compose:
-        assert retrying_requests.get(f"http://{docker_compose['other_server']}:8000").ok
+def test_docker_compose_cm_with_yml(other_docker_compose_yml, retrying_requests):
+    with docker_compose_cm(docker_compose_yml=other_docker_compose_yml) as hostnames:
+        assert retrying_requests.get(f"http://{hostnames['other_server']}:8000").ok
 
 
-def test_docker_compose_cm_with_network(request, docker_compose_cm, retrying_requests):
+def test_docker_compose_cm_with_network(request, retrying_requests):
     with docker_compose_cm(
         docker_compose_yml=os.path.join(
             os.path.dirname(request.fspath), "networked-docker-compose.yml"
         ),
         network_name="network",
-    ) as docker_compose:
+    ) as hostnames:
         assert "network" in subprocess.check_output(["docker", "network", "ls"]).decode()
-        assert retrying_requests.get(f"http://{docker_compose['server']}:8000").ok
+        assert retrying_requests.get(f"http://{hostnames['server']}:8000").ok
 
 
-def test_docker_compose_cm_single_service(request, docker_compose_cm, retrying_requests):
+def test_docker_compose_cm_single_service(request, retrying_requests):
     with docker_compose_cm(
         docker_compose_yml=os.path.join(
             os.path.dirname(request.fspath), "multi-service-docker-compose.yml"
         ),
         service="server2",
-    ) as docker_compose:
-        assert not docker_compose.get("server1")
-        assert retrying_requests.get(f"http://{docker_compose['server2']}:8001").ok
+    ) as hostnames:
+        assert not hostnames.get("server1")
+        assert retrying_requests.get(f"http://{hostnames['server2']}:8001").ok
 
 
-def test_docker_compose_cm_destroys_volumes(docker_compose_cm, test_id):
-    with docker_compose_cm():
+def test_docker_compose_cm_destroys_volumes(test_directory, test_id):
+    with docker_compose_cm(default_docker_compose_yml(test_directory)):
         assert subprocess.check_output(["docker", "volume", "inspect", test_id])
+
     with pytest.raises(Exception):
         subprocess.check_output(["docker", "volume", "inspect", test_id])
 
 
-def test_connect_container_to_network(docker_compose_cm, other_docker_compose_yml, caplog):
+def test_connect_container_to_network(other_docker_compose_yml, caplog):
     caplog.set_level("INFO")
 
     with docker_compose_cm(docker_compose_yml=other_docker_compose_yml) as docker_compose:
@@ -94,7 +99,7 @@ def test_connect_container_to_network(docker_compose_cm, other_docker_compose_ym
         assert f"Unable to connect {container} to network {network}." in caplog.text
 
 
-def test_disconnect_container_from_network(docker_compose_cm, other_docker_compose_yml, caplog):
+def test_disconnect_container_from_network(other_docker_compose_yml, caplog):
     caplog.set_level("INFO")
 
     with docker_compose_cm(docker_compose_yml=other_docker_compose_yml) as docker_compose:

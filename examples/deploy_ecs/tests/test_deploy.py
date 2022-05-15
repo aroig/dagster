@@ -5,6 +5,7 @@ import subprocess
 
 import pytest
 import yaml
+from dagster_test.fixtures import default_docker_compose_yml, docker_compose_cm
 
 from dagster import file_relative_path
 
@@ -114,13 +115,15 @@ def docker_compose(
     overridden_dockerfile,
     overridden_dagster_yaml,
     docker_context,
-    docker_compose_cm,
+    test_directory,
     monkeypatch,
     test_id,
 ):
     # docker-compose.yml expects this envvar to be set so it can tag images
     monkeypatch.setenv("REGISTRY_URL", "test")
-    with docker_compose_cm(docker_context=docker_context) as docker_compose:
+    with docker_compose_cm(
+        default_docker_compose_yml(test_directory), docker_context=docker_context
+    ) as docker_compose:
         yield docker_compose
 
 
