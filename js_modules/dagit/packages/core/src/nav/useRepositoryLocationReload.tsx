@@ -1,11 +1,11 @@
-import {gql, useApolloClient, useMutation, useQuery} from '@apollo/client';
+import {ApolloClient, gql, useApolloClient, useQuery} from '@apollo/client';
 // eslint-disable-next-line no-restricted-imports
 import {Intent} from '@blueprintjs/core';
 import * as React from 'react';
 
 import {SharedToaster} from '../app/DomUtils';
 import {useInvalidateConfigsForRepo} from '../app/ExecutionSessionStorage';
-import {PYTHON_ERROR_FRAGMENT} from '../app/PythonErrorInfo';
+import {PYTHON_ERROR_FRAGMENT, UNAUTHORIZED_ERROR_FRAGMENT} from '../app/PythonErrorInfo';
 import {PythonErrorFragment} from '../app/types/PythonErrorFragment';
 import {RepositoryLocationLoadStatus} from '../types/globalTypes';
 
@@ -13,19 +13,26 @@ import {
   ReloadRepositoryLocationMutation,
   ReloadRepositoryLocationMutationVariables,
 } from './types/ReloadRepositoryLocationMutation';
+import {ReloadWorkspaceMutation} from './types/ReloadWorkspaceMutation';
 import {RepositoryLocationStatusQuery} from './types/RepositoryLocationStatusQuery';
 
 type State = {
   mutating: boolean;
   pollStartTime: number | null;
+  pollLocationIds: string[] | null;
   error: PythonErrorFragment | {message: string} | null;
+  errorLocationId: string | null;
 };
 
 type Action =
   | {type: 'start-mutation'}
-  | {type: 'finish-mutation-and-start-polling'}
+  | {type: 'finish-mutation-and-start-polling'; locationIds: string[]}
   | {type: 'finish-polling'}
-  | {type: 'error'; error: PythonErrorFragment | {message: string} | null}
+  | {
+      type: 'error';
+      error: PythonErrorFragment | {message: string} | null;
+      errorLocationId: string | null;
+    }
   | {type: 'success'};
 
 const reducer = (state: State, action: Action) => {
@@ -33,11 +40,22 @@ const reducer = (state: State, action: Action) => {
     case 'start-mutation':
       return {...state, mutating: true, pollStartTime: null};
     case 'finish-mutation-and-start-polling':
-      return {...state, mutating: false, pollStartTime: Date.now()};
+      return {
+        ...state,
+        mutating: false,
+        pollStartTime: Date.now(),
+        pollLocationIds: action.locationIds,
+      };
     case 'finish-polling':
       return {...state, pollStartTime: null};
     case 'error':
-      return {...state, mutating: false, error: action.error, pollStartTime: null};
+      return {
+        ...state,
+        mutating: false,
+        error: action.error,
+        errorLocationId: action.errorLocationId,
+        pollStartTime: null,
+      };
     case 'success':
       return {...state, error: null, pollStartTime: null};
     default:
@@ -48,21 +66,30 @@ const reducer = (state: State, action: Action) => {
 const initialState: State = {
   mutating: false,
   pollStartTime: null,
+  pollLocationIds: null,
   error: null,
+  errorLocationId: null,
 };
 
 const THREE_MINUTES = 3 * 60 * 1000;
 
-export const useRepositoryLocationReload = (location: string) => {
+/**
+ * This hook implements a two step flow: run a reload function that returns a list of locations,
+ * and then poll those locations until their loadStatus is LOADED, reporting any errors that
+ * occur.
+ *
+ * For convenience, there are two pre-built reload functions below, one for reloading the workspace
+ * (and waiting for all locations to come back online), and one for reloading a single location.
+ */
+export const useRepositoryLocationReload = ({
+  scope,
+  reloadFn,
+}: {
+  scope: 'Repository Location' | 'Workspace';
+  reloadFn: (client: ApolloClient<any>) => Promise<Action>;
+}) => {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   const apollo = useApolloClient();
-  const [reload] = useMutation<
-    ReloadRepositoryLocationMutation,
-    ReloadRepositoryLocationMutationVariables
-  >(RELOAD_REPOSITORY_LOCATION_MUTATION, {
-    variables: {location},
-    fetchPolicy: 'no-cache',
-  });
 
   const invalidateConfigs = useInvalidateConfigsForRepo();
 
@@ -79,16 +106,25 @@ export const useRepositoryLocationReload = (location: string) => {
         const workspace = data.workspaceOrError;
 
         if (workspace.__typename === 'PythonError') {
-          dispatch({type: 'error', error: workspace});
+          dispatch({type: 'error', error: workspace, errorLocationId: null});
+          stopPolling();
+          return;
+        }
+        if (state.pollLocationIds === null) {
           stopPolling();
           return;
         }
 
-        const match = workspace.locationEntries.find((l) => l.id === location);
-        if (!match) {
+        const matches = state.pollLocationIds
+          .map((location) => workspace.locationEntries.find((l) => l.id === location)!)
+          .filter(Boolean);
+        const missing = state.pollLocationIds.find((id) => !matches.some((m) => m.id === id));
+
+        if (missing) {
           dispatch({
             type: 'error',
-            error: {message: `Location ${location} not found in workspace.`},
+            error: {message: `Location ${missing} not found in workspace.`},
+            errorLocationId: missing,
           });
           stopPolling();
           return;
@@ -96,11 +132,15 @@ export const useRepositoryLocationReload = (location: string) => {
 
         // If we're still loading, there's nothing to do yet. Continue polling unless
         // we have hit our timeout threshold.
-        if (match.loadStatus === RepositoryLocationLoadStatus.LOADING) {
+        if (matches.some((l) => l.loadStatus === RepositoryLocationLoadStatus.LOADING)) {
           if (Date.now() - Number(state.pollStartTime) > THREE_MINUTES) {
+            const message = `Timed out waiting for the location${
+              matches.length > 1 ? 's' : ''
+            } to reload.`;
             dispatch({
               type: 'error',
-              error: {message: 'Timed out waiting for the location to reload.'},
+              error: {message},
+              errorLocationId: null,
             });
             stopPolling();
           }
@@ -108,8 +148,16 @@ export const useRepositoryLocationReload = (location: string) => {
         }
 
         // If we're done loading and an error persists, show it.
-        if (match.locationOrLoadError?.__typename === 'PythonError') {
-          dispatch({type: 'error', error: match.locationOrLoadError});
+        const errorLocation = matches.find(
+          (m) => m.locationOrLoadError?.__typename === 'PythonError',
+        );
+
+        if (errorLocation && errorLocation.locationOrLoadError?.__typename === 'PythonError') {
+          dispatch({
+            type: 'error',
+            error: errorLocation.locationOrLoadError,
+            errorLocationId: errorLocation.id,
+          });
           stopPolling();
           return;
         }
@@ -120,7 +168,7 @@ export const useRepositoryLocationReload = (location: string) => {
 
         // On success, show the successful toast, hide the dialog (if open), and reset Apollo.
         SharedToaster.show({
-          message: 'Repository location reloaded!',
+          message: `${scope} reloaded!`,
           timeout: 3000,
           icon: 'done',
           intent: Intent.SUCCESS,
@@ -128,13 +176,17 @@ export const useRepositoryLocationReload = (location: string) => {
         dispatch({type: 'success'});
 
         // Update run config localStorage, which may now be out of date.
-        const repositories =
-          match?.__typename === 'WorkspaceLocationEntry' &&
-          match.locationOrLoadError?.__typename === 'RepositoryLocation'
-            ? match.locationOrLoadError.repositories
-            : [];
+        const repositories = matches.flatMap((location) =>
+          location?.__typename === 'WorkspaceLocationEntry' &&
+          location.locationOrLoadError?.__typename === 'RepositoryLocation'
+            ? location.locationOrLoadError.repositories.map((repo) => ({
+                ...repo,
+                locationName: location.id,
+              }))
+            : [],
+        );
 
-        invalidateConfigs(repositories.map((repo) => ({...repo, locationName: match.id})));
+        invalidateConfigs(repositories);
 
         // Clear and refetch all the queries bound to the UI.
         apollo.resetStore();
@@ -144,51 +196,23 @@ export const useRepositoryLocationReload = (location: string) => {
 
   const tryReload = React.useCallback(async () => {
     dispatch({type: 'start-mutation'});
-    const {data} = await reload();
-
-    if (data?.reloadRepositoryLocation.__typename === 'WorkspaceLocationEntry') {
-      // If the mutation occurs successfully, begin polling.
-      dispatch({type: 'finish-mutation-and-start-polling'});
-      startPolling(5000);
-    } else if (data?.reloadRepositoryLocation.__typename === 'PythonError') {
-      // If a Python error occurs during mutation, show it.
-      dispatch({type: 'error', error: data.reloadRepositoryLocation});
-    } else {
-      // Otherwise, we have some other kind of error. Show it.
-      dispatch({
-        type: 'error',
-        error: {message: data?.reloadRepositoryLocation.message || 'An unexpected error occurred.'},
-      });
+    const action = await reloadFn(apollo);
+    dispatch(action);
+    if (action.type === 'finish-mutation-and-start-polling') {
+      startPolling(THREE_MINUTES);
     }
-  }, [reload, startPolling]);
+  }, [apollo, reloadFn, startPolling]);
 
-  const {mutating, pollStartTime, error} = state;
+  const {mutating, pollStartTime, error, errorLocationId} = state;
   const reloading = mutating || pollStartTime !== null;
 
-  return React.useMemo(() => ({reloading, error, tryReload}), [reloading, error, tryReload]);
+  return React.useMemo(() => ({reloading, error, errorLocationId, tryReload}), [
+    reloading,
+    error,
+    errorLocationId,
+    tryReload,
+  ]);
 };
-
-const RELOAD_REPOSITORY_LOCATION_MUTATION = gql`
-  mutation ReloadRepositoryLocationMutation($location: String!) {
-    reloadRepositoryLocation(repositoryLocationName: $location) {
-      __typename
-      ... on WorkspaceLocationEntry {
-        id
-      }
-      ... on UnauthorizedError {
-        message
-      }
-      ... on ReloadNotSupported {
-        message
-      }
-      ... on RepositoryLocationNotFound {
-        message
-      }
-      ...PythonErrorFragment
-    }
-  }
-  ${PYTHON_ERROR_FRAGMENT}
-`;
 
 const REPOSITORY_LOCATION_STATUS_QUERY = gql`
   query RepositoryLocationStatusQuery {
@@ -214,6 +238,113 @@ const REPOSITORY_LOCATION_STATUS_QUERY = gql`
             ...PythonErrorFragment
           }
         }
+      }
+      ...PythonErrorFragment
+    }
+  }
+  ${PYTHON_ERROR_FRAGMENT}
+`;
+
+// Reload Function - Workspace
+
+export const reloadFnForWorkspace = async (client: ApolloClient<any>): Promise<Action> => {
+  const {data} = await client.mutate<ReloadWorkspaceMutation>({
+    mutation: RELOAD_WORKSPACE_MUTATION,
+  });
+  if (!data) {
+    return {type: 'error', error: {message: 'Unable to reload workspace'}, errorLocationId: null};
+  }
+  if (
+    data.reloadWorkspace.__typename === 'PythonError' ||
+    data.reloadWorkspace.__typename === 'UnauthorizedError'
+  ) {
+    return {type: 'error', error: data?.reloadWorkspace, errorLocationId: null};
+  }
+  return {
+    type: 'finish-mutation-and-start-polling',
+    locationIds: data.reloadWorkspace.locationEntries.map((l) => l.id),
+  };
+};
+
+const RELOAD_WORKSPACE_MUTATION = gql`
+  mutation ReloadWorkspaceMutation {
+    reloadWorkspace {
+      ... on Workspace {
+        locationEntries {
+          __typename
+          name
+          id
+          loadStatus
+          locationOrLoadError {
+            __typename
+            ... on RepositoryLocation {
+              id
+              repositories {
+                id
+                name
+                pipelines {
+                  id
+                  name
+                }
+              }
+            }
+            ...PythonErrorFragment
+          }
+        }
+      }
+      ...UnauthorizedErrorFragment
+      ...PythonErrorFragment
+    }
+  }
+  ${UNAUTHORIZED_ERROR_FRAGMENT}
+  ${PYTHON_ERROR_FRAGMENT}
+`;
+
+// Reload Function - Single Location
+
+export const buildReloadFnForLocation = (location: string) => {
+  return async (client: ApolloClient<any>): Promise<Action> => {
+    const {data} = await client.mutate<
+      ReloadRepositoryLocationMutation,
+      ReloadRepositoryLocationMutationVariables
+    >({
+      mutation: RELOAD_REPOSITORY_LOCATION_MUTATION,
+      variables: {location},
+      fetchPolicy: 'no-cache',
+    });
+
+    if (data?.reloadRepositoryLocation.__typename === 'WorkspaceLocationEntry') {
+      // If the mutation occurs successfully, begin polling.
+      return {type: 'finish-mutation-and-start-polling', locationIds: [location]};
+    } else if (data?.reloadRepositoryLocation.__typename === 'PythonError') {
+      // If a Python error occurs during mutation, show it.
+      return {type: 'error', error: data.reloadRepositoryLocation, errorLocationId: location};
+    } else {
+      // Otherwise, we have some other kind of error. Show it.
+      return {
+        type: 'error',
+        error: {message: data?.reloadRepositoryLocation.message || 'An unexpected error occurred.'},
+        errorLocationId: location,
+      };
+    }
+  };
+};
+
+const RELOAD_REPOSITORY_LOCATION_MUTATION = gql`
+  mutation ReloadRepositoryLocationMutation($location: String!) {
+    reloadRepositoryLocation(repositoryLocationName: $location) {
+      __typename
+      ... on WorkspaceLocationEntry {
+        id
+      }
+      ... on UnauthorizedError {
+        message
+      }
+      ... on ReloadNotSupported {
+        message
+      }
+      ... on RepositoryLocationNotFound {
+        message
       }
       ...PythonErrorFragment
     }
