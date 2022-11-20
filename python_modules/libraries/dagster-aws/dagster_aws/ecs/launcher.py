@@ -313,7 +313,7 @@ class EcsRunLauncher(RunLauncher, ConfigurableClass):
 
         # Set cpu or memory overrides
         # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html
-        cpu_and_memory_overrides = self.get_cpu_and_memory_overrides(run)
+        cpu_and_memory_overrides = self._get_cpu_and_memory_overrides(run)
         resources_container_overrides = self._get_resources_container_overrides(run)
 
         task_overrides = self._get_task_overrides(run)
@@ -379,7 +379,7 @@ class EcsRunLauncher(RunLauncher, ConfigurableClass):
             cls=self.__class__,
         )
 
-    def get_cpu_and_memory_overrides(self, run: PipelineRun) -> Mapping[str, str]:
+    def _get_cpu_and_memory_overrides(self, run: PipelineRun) -> Mapping[str, str]:
         overrides = {}
 
         cpu = run.tags.get("ecs/cpu")
