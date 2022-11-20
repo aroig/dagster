@@ -31,7 +31,7 @@ from .tasks import (
 )
 from .utils import sanitize_family, task_definitions_match
 
-Tags = namedtuple("Tags", ["arn", "cluster", "cpu", "memory"])
+Tags = namedtuple("Tags", ["arn", "cluster", "cpu", "memory", "gpu_count"])
 
 RUNNING_STATUSES = [
     "PROVISIONING",
@@ -273,8 +273,9 @@ class EcsRunLauncher(RunLauncher, ConfigurableClass):
         cluster = tags.get("ecs/cluster")
         cpu = tags.get("ecs/cpu")
         memory = tags.get("ecs/memory")
+        gpu_count = tags.get("ecs/gpu_count")
 
-        return Tags(arn, cluster, cpu, memory)
+        return Tags(arn, cluster, cpu, memory, gpu_count)
 
     def launch_run(self, context: LaunchRunContext) -> None:
 
@@ -313,6 +314,7 @@ class EcsRunLauncher(RunLauncher, ConfigurableClass):
         # Set cpu or memory overrides
         # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html
         cpu_and_memory_overrides = self.get_cpu_and_memory_overrides(run)
+        resources_container_overrides = self._get_resources_container_overrides(run)
 
         task_overrides = self._get_task_overrides(run)
 
@@ -323,8 +325,7 @@ class EcsRunLauncher(RunLauncher, ConfigurableClass):
                 "name": self._get_container_name(container_context),
                 "command": command,
                 "environment": environment,
-                # containerOverrides expects cpu/memory as integers
-                **{k: int(v) for k, v in cpu_and_memory_overrides.items()},
+                **resources_container_overrides,
             }
         ]
 
@@ -389,6 +390,23 @@ class EcsRunLauncher(RunLauncher, ConfigurableClass):
         if memory:
             overrides["memory"] = memory
         return overrides
+
+    def _get_resources_container_overrides(self, run: PipelineRun) -> Mapping[str, str]:
+        overrides = {}
+
+        cpu = run.tags.get("ecs/cpu")
+        memory = run.tags.get("ecs/memory")
+        gpu_count = run.tags.get("ecs/gpu_count")
+
+        if cpu:
+            overrides["cpu"] = int(cpu)
+        if memory:
+            overrides["memory"] = int(memory)
+        if gpu_count:
+            overrides["resourceRequirements"] = {"type": "GPU", "value": str(gpu_count)}
+
+        return overrides
+
 
     def _get_task_overrides(self, run: PipelineRun) -> Mapping[str, Any]:
         overrides = run.tags.get("ecs/task_overrides")
