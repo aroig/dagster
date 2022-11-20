@@ -382,11 +382,8 @@ class EcsRunLauncher(RunLauncher, ConfigurableClass):
     def _get_cpu_and_memory_overrides(self, run: PipelineRun) -> Mapping[str, str]:
         overrides = {}
 
-        cpu = run.tags.get("ecs/cpu")
         memory = run.tags.get("ecs/memory")
 
-        if cpu:
-            overrides["cpu"] = cpu
         if memory:
             overrides["memory"] = memory
         return overrides
