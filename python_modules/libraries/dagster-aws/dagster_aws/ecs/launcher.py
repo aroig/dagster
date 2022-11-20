@@ -403,7 +403,7 @@ class EcsRunLauncher(RunLauncher, ConfigurableClass):
         if memory:
             overrides["memory"] = int(memory)
         if gpu_count:
-            overrides["resourceRequirements"] = {"type": "GPU", "value": str(gpu_count)}
+            overrides["resourceRequirements"] = [{"type": "GPU", "value": str(gpu_count)}]
 
         return overrides
 
