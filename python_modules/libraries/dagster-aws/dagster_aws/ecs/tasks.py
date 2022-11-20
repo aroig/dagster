@@ -310,5 +310,4 @@ def get_task_kwargs_from_current_task(
                 "securityGroups": security_groups,
             },
         },
-        "launchType": task.get("launchType") or "FARGATE",
     }
