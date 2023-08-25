@@ -66,19 +66,30 @@ def get_base_asset_jobs(
     resource_defs: Optional[Mapping[str, ResourceDefinition]],
     executor_def: Optional[ExecutorDefinition],
 ) -> Sequence[JobDefinition]:
-    assets_by_partitions_def: Dict[Optional[PartitionsDefinition], List[AssetsDefinition]] = (
+    assets_by_partitions_def: Dict[PartitionsDefinition, List[AssetsDefinition]] = (
         defaultdict(list)
     )
-    for assets_def in assets:
-        assets_by_partitions_def[assets_def.partitions_def].append(assets_def)
+    unpartitioned_assets: List[AssetsDefinition] = []
 
-    # We need to create "empty" jobs for each partitions def that is used by an observable but no
-    # materializable asset. They are empty because we don't assign the source asset to the `assets`,
-    # but rather the `source_assets` argument of `build_assets_job`.
-    for observable in [sa for sa in source_assets if sa.is_observable]:
-        if observable.partitions_def not in assets_by_partitions_def:
-            assets_by_partitions_def[observable.partitions_def] = []
-    if len(assets_by_partitions_def.keys()) == 0 or assets_by_partitions_def.keys() == {None}:
+    for assets_def in assets:
+        if assets_def.partitions_def is None:
+            unpartitioned_assets.append(assets_def)
+        else:
+            assets_by_partitions_def[assets_def.partitions_def].append(assets_def)
+
+    observable_assets_by_partitions_def: Dict[PartitionsDefinition, List[SourceAsset]] = (
+        defaultdict(list)
+    )
+    unpartitioned_observable_assets: List[SourceAsset] = []
+
+    for source_asset in source_assets:
+        if source_asset.is_observable:
+            if source_asset.partitions_def is None:
+                unpartitioned_observable_assets.append(source_asset)
+            else:
+                observable_assets_by_partitions_def[source_asset.partitions_def].append(source_asset)
+
+    if len(assets_by_partitions_def.keys()) == 0:
         return [
             build_assets_job(
                 name=ASSET_BASE_JOB_PREFIX,
@@ -90,16 +101,24 @@ def get_base_asset_jobs(
             )
         ]
     else:
-        unpartitioned_assets = assets_by_partitions_def.get(None, [])
-        partitioned_assets_by_partitions_def = {
-            k: v for k, v in assets_by_partitions_def.items() if k is not None
-        }
+        # We want to create a job for each partitions definition used in assets and observable source assets.
+        # In case a partition is only used by an observable source asset and no materializable assets, we will
+        # create an empty job, i.e. one with assets = [].
+        partitions_def_with_assets = [
+            p
+            for p in set(assets_by_partitions_def.keys()) | set(observable_assets_by_partitions_def.keys())
+            if p is not None
+        ]
+
+        # Sort to ensure some stability in the ordering
+        partitions_def_with_assets.sort(key=lambda p: repr(p))
+
         jobs = []
 
-        # sort to ensure some stability in the ordering
-        for i, (partitions_def, assets_with_partitions) in enumerate(
-            sorted(partitioned_assets_by_partitions_def.items(), key=lambda item: repr(item[0]))
-        ):
+        for i, partitions_def in enumerate(partitions_def_with_assets):
+            assets_with_partitions = assets_by_partitions_def.get(partitions_def, [])
+            observable_assets_with_partitions = observable_assets_by_partitions_def.get(partitions_def, [])
+
             jobs.append(
                 build_assets_job(
                     f"{ASSET_BASE_JOB_PREFIX}_{i}",
