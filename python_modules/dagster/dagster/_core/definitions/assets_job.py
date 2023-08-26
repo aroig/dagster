@@ -119,17 +119,25 @@ def get_base_asset_jobs(
             assets_with_partitions = assets_by_partitions_def.get(partitions_def, [])
             observable_assets_with_partitions = observable_assets_by_partitions_def.get(partitions_def, [])
 
+            partitions_def_for_job: Optional[PartitionsDefinition]
+            source_assets_for_job: Sequence[Union[SourceAsset, AssetsDefinition]]
+            if len(assets_with_partitions) == 0:
+                partitions_def_for_job = partitions_def
+                source_assets_for_job = [*observable_assets_with_partitions, *unpartitioned_observable_assets]
+
+            else:
+                partitions_def_for_job = None
+                source_assets_for_job = [*source_assets, *assets]
+
             jobs.append(
                 build_assets_job(
                     f"{ASSET_BASE_JOB_PREFIX}_{i}",
                     assets=[*assets_with_partitions, *unpartitioned_assets],
-                    source_assets=[*source_assets, *assets],
+                    source_assets=source_assets_for_job,
                     asset_checks=asset_checks,
                     resource_defs=resource_defs,
                     executor_def=executor_def,
-                    # Only explicitly set partitions_def for observable-only jobs since it can't be
-                    # auto-detected from the passed assets (which is an empty list).
-                    partitions_def=partitions_def if len(assets_with_partitions) == 0 else None,
+                    partitions_def=partitions_def_for_job,
                 )
             )
         return jobs
